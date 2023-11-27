@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:meta/meta.dart';
 import 'package:http/http.dart' as http;
 import 'package:xml/xml.dart' as xml;
 
@@ -19,9 +18,7 @@ class Spaces extends Client {
             secretKey: secretKey,
             service: "s3",
             endpointUrl: endpointUrl,
-            httpClient: httpClient) {
-    // ...
-  }
+            httpClient: httpClient);
 
   Bucket bucket(String? bucket) {
     if (endpointUrl == "https://${region}.digitaloceanspaces.com") {
@@ -44,7 +41,7 @@ class Spaces extends Client {
       for (xml.XmlElement buckets in root.findElements('Buckets')) {
         for (xml.XmlElement bucket in buckets.findElements('Bucket')) {
           for (xml.XmlElement name in bucket.findElements('Name')) {
-            res.add(name.text);
+            res.add(name.value!);
           }
         }
       }
