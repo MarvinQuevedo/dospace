@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
+import 'package:http_parser/http_parser.dart';
+
 import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
@@ -110,32 +111,22 @@ class Bucket extends Client {
   }
 
   /// Uploads file. Returns Etag.
+
   Future<String?> uploadFile(
-    String key,
-    File file,
-    String contentType,
-    Permissions permissions, {
-    Map<String, String>? meta,
-    ProgressCallback? onProgress,
-  }) async {
+      String key, dynamic file, String contentType, Permissions permissions,
+      {Map<String, String>? meta, ProgressCallback? onProgress}) async {
     int? contentLength = await file.length();
     Digest contentSha256 = await sha256.bind(file.openRead()).first;
     String uriStr = endpointUrl + '/' + key;
-    http.StreamedRequest request =
-        new http.StreamedRequest('PUT', Uri.parse(uriStr));
-    Stream<List<int>> stream = file.openRead();
-    int uploadedBytes = 0;
-    int totalBytes = contentLength;
-    stream.listen((List<int> data) {
-      uploadedBytes += data.length;
-      double progress = uploadedBytes / totalBytes;
-      print('Progreso de subida: ${(progress * 100).toStringAsFixed(2)}%');
-      onProgress?.call(uploadedBytes, totalBytes);
-      request.sink.add(data);
-    }, onError: request.sink.addError, onDone: request.sink.close);
-
-    // Obtener el progreso de subida
-
+    final request = MultipartRequest(
+      'PUT',
+      Uri.parse(uriStr),
+      onProgress: onProgress,
+    );
+    http.MultipartFile filePart = await http.MultipartFile.fromPath(
+        'file', file.path,
+        contentType: MediaType.parse(contentType));
+    request.files.add(filePart);
     if (meta != null) {
       for (MapEntry<String, String> me in meta.entries) {
         request.headers["x-amz-meta-${me.key}"] = me.value;
@@ -147,8 +138,9 @@ class Bucket extends Client {
     request.headers['Content-Length'] = contentLength.toString();
     request.headers['Content-Type'] = contentType;
     signRequest(request, contentSha256: contentSha256);
-    http.StreamedResponse response = await httpClient.send(request);
-    String body = await utf8.decodeStream(response.stream);
+    http.Response response =
+        await http.Response.fromStream(await http.Client().send(request));
+    String body = response.body;
     if (response.statusCode != 200) {
       throw new ClientException(
           response.statusCode, response.reasonPhrase, response.headers, body);
@@ -217,5 +209,38 @@ class Bucket extends Client {
     }
     return signRequest(request,
         contentSha256: contentSha256, expires: expires, preSignedUrl: true);
+  }
+}
+
+class MultipartRequest extends http.MultipartRequest {
+  /// Creates a new [MultipartRequest].
+  MultipartRequest(
+    String method,
+    Uri url, {
+    this.onProgress,
+  }) : super(method, url);
+
+  final ProgressCallback? onProgress;
+
+  /// Freezes all mutable fields and returns a single-subscription [ByteStream]
+  /// that will emit the request body.
+
+  @override
+  http.ByteStream finalize() {
+    final byteStream = super.finalize();
+    if (onProgress == null) return byteStream;
+
+    final total = this.contentLength;
+    int bytes = 0;
+
+    final t = StreamTransformer.fromHandlers(
+      handleData: (List<int> data, EventSink<List<int>> sink) {
+        bytes += data.length;
+        onProgress!(bytes, total);
+        sink.add(data);
+      },
+    );
+    final stream = byteStream.transform(t);
+    return http.ByteStream(stream);
   }
 }
