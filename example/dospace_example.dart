@@ -26,7 +26,7 @@ main() async {
   }
   dospace.Bucket bucket = spaces.bucket(bucketName);
   String? etag = await bucket.uploadFile(
-      'README.md', 'README.md', 'text/plain', dospace.Permissions.public);
+      'README.md', File('README.md'), 'text/plain', dospace.Permissions.public);
   print('upload: $etag');
 
   // Basic pre-signed URL

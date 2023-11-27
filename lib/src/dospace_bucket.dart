@@ -1,13 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
-import 'package:meta/meta.dart';
 import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import 'package:xml/xml.dart' as xml;
 
 import 'dospace_client.dart';
 import 'dospace_results.dart';
+
+typedef void ProgressCallback(int uploadedBytes, int totalBytes);
 
 enum Permissions {
   private,
@@ -63,11 +65,11 @@ class Bucket extends Client {
             xml.XmlElement ele = node;
             switch ('${ele.name}') {
               case "NextMarker":
-                marker = ele.text;
+                marker = ele.value;
                 break;
               case "IsTruncated":
                 isTruncated =
-                    ele.text.toLowerCase() != "false" && ele.text != "0";
+                    ele.value!.toLowerCase() != "false" && ele.value! != "0";
                 break;
               case "Contents":
                 String? key;
@@ -79,16 +81,16 @@ class Bucket extends Client {
                     xml.XmlElement ele = node;
                     switch ('${ele.name}') {
                       case "Key":
-                        key = ele.text;
+                        key = ele.value;
                         break;
                       case "LastModified":
-                        lastModifiedUtc = DateTime.parse(ele.text);
+                        lastModifiedUtc = DateTime.parse(ele.value!);
                         break;
                       case "ETag":
-                        eTag = ele.text;
+                        eTag = ele.value;
                         break;
                       case "Size":
-                        size = int.parse(ele.text);
+                        size = int.parse(ele.value!);
                         break;
                     }
                   }
@@ -109,8 +111,13 @@ class Bucket extends Client {
 
   /// Uploads file. Returns Etag.
   Future<String?> uploadFile(
-      String key, dynamic file, String contentType, Permissions permissions,
-      {Map<String, String>? meta}) async {
+    String key,
+    File file,
+    String contentType,
+    Permissions permissions, {
+    Map<String, String>? meta,
+    ProgressCallback? onProgress,
+  }) async {
     int? contentLength = await file.length();
     Digest contentSha256 = await sha256.bind(file.openRead()).first;
     String uriStr = endpointUrl + '/' + key;
@@ -119,6 +126,26 @@ class Bucket extends Client {
     Stream<List<int>> stream = file.openRead();
     stream.listen(request.sink.add,
         onError: request.sink.addError, onDone: request.sink.close);
+
+    // Obtener el progreso de subida
+    int uploadedBytes = 0;
+    int totalBytes = contentLength;
+    stream.transform(StreamTransformer.fromHandlers(
+      handleData: (List<int> data, EventSink<List<int>> sink) {
+        uploadedBytes += data.length;
+        double progress = uploadedBytes / totalBytes;
+        print('Progreso de subida: ${(progress * 100).toStringAsFixed(2)}%');
+        onProgress?.call(uploadedBytes, totalBytes);
+        sink.add(data);
+      },
+      handleError: (error, stackTrace, sink) {
+        sink.addError(error, stackTrace);
+      },
+      handleDone: (sink) {
+        sink.close();
+      },
+    ));
+
     if (meta != null) {
       for (MapEntry<String, String> me in meta.entries) {
         request.headers["x-amz-meta-${me.key}"] = me.value;
