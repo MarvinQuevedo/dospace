@@ -124,27 +124,17 @@ class Bucket extends Client {
     http.StreamedRequest request =
         new http.StreamedRequest('PUT', Uri.parse(uriStr));
     Stream<List<int>> stream = file.openRead();
-    stream.listen(request.sink.add,
-        onError: request.sink.addError, onDone: request.sink.close);
-
-    // Obtener el progreso de subida
     int uploadedBytes = 0;
     int totalBytes = contentLength;
-    stream.transform(StreamTransformer.fromHandlers(
-      handleData: (List<int> data, EventSink<List<int>> sink) {
-        uploadedBytes += data.length;
-        double progress = uploadedBytes / totalBytes;
-        print('Progreso de subida: ${(progress * 100).toStringAsFixed(2)}%');
-        onProgress?.call(uploadedBytes, totalBytes);
-        sink.add(data);
-      },
-      handleError: (error, stackTrace, sink) {
-        sink.addError(error, stackTrace);
-      },
-      handleDone: (sink) {
-        sink.close();
-      },
-    ));
+    stream.listen((List<int> data) {
+      uploadedBytes += data.length;
+      double progress = uploadedBytes / totalBytes;
+      print('Progreso de subida: ${(progress * 100).toStringAsFixed(2)}%');
+      onProgress?.call(uploadedBytes, totalBytes);
+      request.sink.add(data);
+    }, onError: request.sink.addError, onDone: request.sink.close);
+
+    // Obtener el progreso de subida
 
     if (meta != null) {
       for (MapEntry<String, String> me in meta.entries) {
